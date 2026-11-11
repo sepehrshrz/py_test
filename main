@@ -79,10 +79,7 @@ db = Database()
 
 
 def create_order(customer_id, items, idempotency_key):
-    existing = db.find_request(customer_id, idempotency_key)
 
-    if existing:
-        return existing["order_id"]
 
     total = Decimal("0.00")
 
