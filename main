@@ -1,0 +1,136 @@
+from decimal import Decimal
+from threading import Thread
+import time
+
+
+class Product:
+    def __init__(self, product_id, name, price, stock):
+        self.id = product_id
+        self.name = name
+        self.price = Decimal(str(price))
+        self.stock = stock
+
+
+class Database:
+    def __init__(self):
+        self.products = {
+            1: Product(1, "Keyboard", "50.00", 10),
+            2: Product(2, "Mouse", "20.00", 5),
+            3: Product(3, "Monitor", "200.00", 2),
+        }
+        self.orders = []
+        self.order_items = []
+        self.payments = []
+        self.request_logs = []
+        self.query_count = 0
+
+    def get_product(self, product_id):
+        self.query_count += 1
+        time.sleep(0.001)
+        return self.products.get(product_id)
+
+    def save_product(self, product):
+        self.query_count += 1
+        self.products[product.id].stock = product.stock
+
+    def create_order(self, customer_id, total):
+        self.query_count += 1
+        order = {
+            "id": len(self.orders) + 1,
+            "customer_id": customer_id,
+            "total": total,
+        }
+        self.orders.append(order)
+        return order
+
+    def create_order_item(self, order_id, product_id, quantity):
+        self.query_count += 1
+        self.order_items.append({
+            "order_id": order_id,
+            "product_id": product_id,
+            "quantity": quantity,
+        })
+
+    def create_payment(self, order_id, amount):
+        self.query_count += 1
+        self.payments.append({
+            "order_id": order_id,
+            "amount": amount,
+            "status": "pending",
+        })
+
+    def find_request(self, customer_id, key):
+        self.query_count += 1
+        for log in self.request_logs:
+            if log["customer_id"] == customer_id and log["key"] == key:
+                return log
+        return None
+
+    def save_request(self, customer_id, key, order_id):
+        self.query_count += 1
+        self.request_logs.append({
+            "customer_id": customer_id,
+            "key": key,
+            "order_id": order_id,
+        })
+
+
+db = Database()
+
+
+def create_order(customer_id, items, idempotency_key):
+    existing = db.find_request(customer_id, idempotency_key)
+
+    if existing:
+        return existing["order_id"]
+
+    total = Decimal("0.00")
+
+    for item in items:
+        product = db.get_product(item["product_id"])
+
+        if product is None:
+            raise ValueError("Product not found")
+
+        if product.stock < item["quantity"]:
+            raise ValueError("Out of stock")
+
+        total += product.price * item["quantity"]
+
+    order = db.create_order(customer_id, total)
+
+    for item in items:
+        product = db.get_product(item["product_id"])
+        product.stock -= item["quantity"]
+        db.save_product(product)
+
+        db.create_order_item(
+            order["id"],
+            product.id,
+            item["quantity"],
+        )
+
+    db.create_payment(order["id"], total)
+
+    db.save_request(
+        customer_id,
+        idempotency_key,
+        order["id"],
+    )
+
+    return order["id"]
+
+
+if name == "__main__":
+    items = [
+        {"product_id": 1, "quantity": 1},
+        {"product_id": 2, "quantity": 2},
+    ]
+
+    result = create_order(100, items, "request-001")
+    print("Order ID:", result)
+    print("Total queries:", db.query_count)
+    print("Remaining stock:", {
+        product_id: product.stock
+        for product_id, product in db.products.items()
+    })
